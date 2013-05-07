@@ -1,0 +1,282 @@
+'CR1000 Series Datalogger
+'To create a different opening program template, type in new
+'instructions and select Template | Save as Default Template
+'date:
+'program author:
+
+'Declare Public Variables
+
+
+' Wiring:
+' TPS-3100 Sensor
+'Wire      Purpose         Datalogger
+'____________________________________
+' Pin 2    RS232 TPSc1 RX    C5         (white)
+' Pin 3    RS232 TPSc1 TX    C6         (red)
+' Pin 5    RS232 Gc1         G          (black, green)
+
+' Pin 2    RS232 TPSs1 RX    C7         (white)
+' Pin 3    RS232 TPSs1 TX    C8         (red)
+' Pin 5    RS232 Gs1         G          (black, green)
+
+'CS10_L sensor (actually a CS15_L)
+' CS10 white                 SE1
+' CS10 red                    AG
+' CS10 black                  AG
+' CS10 clear                  AG
+
+'Judd snow depth (analog)
+'Wire       Purpose        Datalogger
+'____________________________________
+'Clear      Shield            G
+'Black      Power -           G
+'Red        Power +           +12V
+'Green      On/Off            C1
+'White      Signal +          3H
+'Brown      Signal -          3L
+
+' C1 -- Judd, green
+' C5 -- TPSc1 RX, white 
+' C6 -- TPSc1 TX, red
+' C7 -- TPSs1 RX, white
+' C8 -- TPSs1 TX, red
+' SE 1 -- CS10, white
+' SE 5 -- Judd, white
+' SE 6 -- Judd, brown
+' AG -- CS10, red, black, clear
+' G -- Judd, clear, black
+' 12v -- Judd, red
+
+Public TPS_out_format As String *3
+Public TPS_timestamp As String * 10
+Public TPS_Fault_Ind As String * 7
+Public TPS_cur_precip As Float
+Public TPS_accum_precip As Float
+Public TPS_AT As Float
+Public TPS_Inst_Temp As Float
+Public TPS_WS As Float
+Public TPS_CRC As String *4
+Public callstring As String * 3
+Public TPS_String As String * 200
+Public TPS_out_format2 As String *3
+Public TPS_timestamp2 As String * 10
+Public TPS_Fault_Ind2 As String * 7
+Public TPS_cur_precip2 As Float
+Public TPS_accum_precip2 As Float
+Public TPS_AT2 As Float
+Public TPS_Inst_Temp2 As Float
+Public TPS_WS2 As Float
+Public TPS_CRC2 As String *4
+Public callstring2 As String * 3
+Public TPS_String2 As String * 200
+Public LoggerTemp_C As Float
+Public BattVolts_V As Float
+
+
+Const num_samples = 100
+Public Amps
+Public Amp_mult
+Dim i_sig(num_samples)
+PreserveVariables
+
+Public Battery
+Public Air_TempC
+Public Air_TempF
+Public Depth
+
+'\\\\\\\\\\\\\\\\\\\\\\\\ OUTPUT SECTION ////////////////////////
+
+DataTable(TableTPSplus,true,-1)
+  DataInterval(0,1,Min,0)
+  Sample(1, TPS_out_format, FP2)
+  Sample(1, TPS_timestamp, String)
+  Sample(1, TPS_Fault_Ind, String)
+  Sample(1, TPS_cur_precip,FP2)
+  Sample(1, TPS_accum_precip,FP2)
+  Sample(1, TPS_AT, FP2)
+  Sample(1, TPS_Inst_Temp, FP2)
+  Sample(1, TPS_WS, FP2)
+  Sample(1, TPS_CRC, String)
+EndTable
+
+DataTable(AmpTable,True,-1)
+  DataInterval(0,1,Min,10)
+  Maximum(1,Amps,IEEE4,False,False)
+  Average(1,Amps,FP2,False)
+EndTable
+  
+
+DataTable(TableTPSplus2,true,-1)
+  DataInterval(0,1,Min,0)
+  Sample(1, TPS_out_format2, FP2)
+  Sample(1, TPS_timestamp2, String)
+  Sample(1, TPS_Fault_Ind2, String)
+  Sample(1, TPS_cur_precip2,FP2)
+  Sample(1, TPS_accum_precip2,FP2)
+  Sample(1, TPS_AT2, FP2)
+  Sample(1, TPS_Inst_Temp2, FP2)
+  Sample(1, TPS_WS2, FP2)
+  Sample(1, TPS_CRC2, String)
+
+EndTable
+
+DataTable(HourlyDiag,true,-1)
+  DataInterval(0,60,Min,10)
+  Sample(1, LoggerTemp_C,FP2)
+  Average(1,LoggerTemp_C,FP2,False)
+  Sample(1,BattVolts_V,FP2)
+  Average(1,BattVolts_V,FP2,False)
+  Maximum(1,BattVolts_V,FP2,False,False)
+  Minimum(1,BattVolts_V,FP2,False,False)
+  
+EndTable
+  
+  DataTable(DepthSensor,true,-1)
+    OpenInterval
+    DataInterval(0,1,Min,10)
+    Average(1,Air_TempF,FP2,0)
+    Sample(1,Depth,FP2)
+  EndTable
+    
+
+'\\\\\\\\\\\\\\\\\\\\\\\\\\\ PROGRAM ////////////////////////////
+
+BeginProg
+  'Scan( 1,Min, 3, 0)
+  Scan(250,mSec,10,0)
+   SequentialMode
+  'PipeLineMode
+    '----------
+    ' Current sensor
+    '----------
+    
+    Amp_mult = 0.2
+    VoltSe(i_sig(1),num_samples,mV2500,-1,True,1000,0,1.0,0)
+    StdDevSpa(Amps,num_samples,i_sig(1))
+    Amps = Amps * Amp_mult
+    CallTable AmpTable
+  
+    If IfTime(0,60,Sec) Then
+    'SequentialMode
+    '''''''''''''''''''''''''''''''''''''''''
+    ''' Measure TPS C1'''''''''''''''''''''''''
+    '''''''''''''''''''''''''''''''''''''''''
+     callstring  = CHR (13 )  & CHR (13 )  &  "T" & CHR (13 ) 
+    ' 1) open the serial port
+    SerialOpen (Com3,9600,0,300,10000)
+    ' 2) flush the port
+    SerialFlush (Com3)
+    ' 3) Send the transmit code and put the response into variable TPS_String
+    SerialOut (Com3,callstring,"",3,0)
+    SerialIn (TPS_String,Com3,100,-1,100)
+    ' 4) Close the serial port
+    SerialClose (Com3)
+    ' 5) Comma separate the string from the TPS
+    'SplitStr (TPS_Array1(),TPS_String,",",8,2)
+    ' 6) Space separate the first bit o' data
+    'SplitStr (TPS_Array2(),TPS_Array1(1)," ",2,2)
+    ' 7) Star separate the last bit o' data
+    'SplitStr (TPS_Array3(),TPS_Array1(8),"*",2,2)
+    TPS_out_format = Mid (TPS_String,3,3)
+    TPS_timestamp = Mid(TPS_String,7,10)
+    TPS_Fault_Ind = Mid(TPS_String,18,7)
+    TPS_cur_precip = Mid(TPS_String,26,5)
+    TPS_accum_precip = Mid(TPS_String,32,8)
+    TPS_AT = Mid(TPS_String,41,5)
+    TPS_Inst_Temp = Mid(TPS_String,47,5)
+    TPS_WS = Mid(TPS_String,53,4)
+    TPS_CRC = Mid(TPS_STring,58,4)
+
+    '''''''''''''''''''''''''''''''''''''''''
+    ''' Measure TPS2 S1'''''''''''''''''''''''''
+    '''''''''''''''''''''''''''''''''''''''''
+     callstring2  = CHR (13 )  & CHR (13 )  &  "T" & CHR (13 ) 
+    ' 1) open the serial port
+    SerialOpen (Com4,9600,0,300,10000)
+    ' 2) flush the port
+    SerialFlush (Com4)
+    ' 3) Send the transmit code and put the response into variable TPS_String
+    SerialOut (Com4,callstring2,"",3,0)
+    SerialIn (TPS_String2,Com4,100,-1,100)
+    ' 4) Close the serial port
+    SerialClose (Com4)
+    ' 5) Comma separate the string from the TPS
+    'SplitStr (TPS_Array1(),TPS_String,",",8,2)
+    ' 6) Space separate the first bit o' data
+    'SplitStr (TPS_Array2(),TPS_Array1(1)," ",2,2)
+    ' 7) Star separate the last bit o' data
+    'SplitStr (TPS_Array3(),TPS_Array1(8),"*",2,2)
+    TPS_out_format2 = Mid (TPS_String2,3,3)
+    TPS_timestamp2 = Mid(TPS_String2,7,10)
+    TPS_Fault_Ind2 = Mid(TPS_String2,18,7)
+    TPS_cur_precip2 = Mid(TPS_String2,26,5)
+    TPS_accum_precip2 = Mid(TPS_String2,32,8)
+    TPS_AT2 = Mid(TPS_String2,41,5)
+    TPS_Inst_Temp2 = Mid(TPS_String2,47,5)
+    TPS_WS2 = Mid(TPS_String2,53,4)
+    TPS_CRC2 = Mid(TPS_STring2,58,4)
+
+
+    Battery (BattVolts_V)
+    PanelTemp (LoggerTemp_C,250)
+
+    
+  '---------
+  '  judd
+  '----------
+    
+    Battery(Battery)
+    'Turn ON the depth sensor
+    PortSet(1,1)
+    'wait 0.8 seconds for the sensor to output the air temp
+    Delay(0,800,MSEC)
+    'air temp is output in milliVolts, scaled to Kelvin, 
+    'and then convert to Celsius.
+    VoltDiff(Air_TempC,1,mV2500,3,True,0,250,0.2,-273)
+    'Air temp is also converted and saved in F
+    Air_TempF = Air_TempC * 1.8
+    Air_TempF = Air_TempF +32
+    'The depth sensor needs another 1.8 seconds to make up
+    'to 10 measurements and perform error checking and 
+    'temp compensation
+    Delay(0,1800,MSEC)
+    'Distance is output in milliVolts, scaled to inches, and
+    'then converted to depth by subtracting the distance
+    'measured from the reference distance.
+    'Use a multiplier of -.19685 for output in inches
+    'and -.5 for output in centimeters.
+    '
+    'The following instruction is configured to output the measured distance in inches
+    'To reconfigure the instruction to output depth in inches do the following:
+    'Change the multiplier from .1968 to -.1968
+    'Change the offset value from 0 to the distance measured
+     VoltDiff(Depth,1,mV2500, 3,True,0,250,0.1968,0)
+     'Turn off the sensor
+     PortSet(1,0)
+     
+     
+' TPS Aliases
+'Alias TPS_Array2(2) = TPS_out_format
+'Alias TPS_Array1(2) = TPS_timestamp
+'Alias TPS_Array1(3) = TPS_Fault_Ind
+'Alias TPS_Array1(4) = TPS_cur_precip
+'Alias TPS_Array1(5) = TPS_accum_precip
+'Alias TPS_Array1(6) = TPS_AT
+'Alias TPS_Array1(7) = TPS_Inst_Temp
+'Alias TPS_Array3(1) = TPS_WS
+'Alias TPS_Array3(2) = TPS_CRC
+
+
+
+
+
+    '------------------------------------------------
+    'Log sensor output once an hour
+   
+    CallTable DepthSensor
+    CallTable TableTPSplus
+    CallTable TableTPSplus2
+    CallTable HourlyDiag
+    endif
+  NextScan
+EndProg
